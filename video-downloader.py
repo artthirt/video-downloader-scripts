@@ -372,7 +372,7 @@ class MainWindow(QMainWindow):
         # Controls
         control_layout = QHBoxLayout()
         
-        self.btn_start = QPushButton("▶ Start Download")
+        self.btn_start = QPushButton("▶ Add to Queue")
         self.btn_start.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 8px;")
         self.btn_start.clicked.connect(self.start_download)
         control_layout.addWidget(self.btn_start)
@@ -500,19 +500,8 @@ class MainWindow(QMainWindow):
         self.history_table.setRowCount(0)
         self.download_history = []
         self.current_row = -1
-    
-    def build_command(self):
-        url = self.url_input.currentText().strip()
-        output = self.output_input.currentText().strip() or "output.mp4"
-        
-        if not url:
-            raise ValueError("Please enter a valid M3U8 URL")
-        
-        self.addUrl(url)
-        self.addOut(output)
-        self.saveSettings()
-        
-        # Build command
+
+    def build_cmd(self, url, output):
         cmd = ['-hide_banner', '-nostdin', '-stats']  # -stats forces progress output
         cmd.extend(['-i', url])
         
@@ -537,6 +526,21 @@ class MainWindow(QMainWindow):
         
         cmd.extend(['-y', '-progress', 'pipe:1'])  # Output progress to stdout
         cmd.append(output)
+        return cmd
+    
+    def build_command(self):
+        url = self.url_input.currentText().strip()
+        output = self.output_input.currentText().strip() or "output.mp4"
+        
+        if not url:
+            raise ValueError("Please enter a valid M3U8 URL")
+        
+        self.addUrl(url)
+        self.addOut(output)
+        self.saveSettings()
+        
+        # Build command
+        cmd = self.build_cmd(url, output)
         
         return cmd, url, output
     
@@ -546,16 +550,44 @@ class MainWindow(QMainWindow):
     def check_waiting_list(self):
         if len(self.waiting_list) == 0:
             return
+        
+        for item in self.waiting_list:
+            print(f'{item.output}: {item.url}')
+
         item = self.waiting_list.pop(0)
         if item is None:
             return
         url = item.url
         output = item.output
+        print(f'Begin download: {item.output}: {item.url}')
         if not self.is_running():
-            self.start_download(url, output)
+            self._start_download(url, output)
+
+    def _start_download(self, url, output):
+        try:            
+            self.progress_bar.setValue(0)
+            self.btn_cancel.setEnabled(True)
+            
+            # Add to history table
+            output_name = os.path.basename(output)
+            self.current_row = self.add_history_row(output_name, url, "Downloading...")
+            
+            cmd_args = self.build_cmd(url, output)
+
+            self.worker = FFmpegWorker(cmd_args)
+            self.worker.progress.connect(self.handle_progress)
+            self.worker.status.connect(self.status_bar.showMessage)
+            self.worker.log.connect(self.append_log)
+            self.worker.finished.connect(self.download_finished)
+            self.worker.start()
+
+        except ValueError as e:
+            QMessageBox.warning(self, "Input Error", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
 
     
-    def start_download(self, manual_url = None, manual_output = None):
+    def start_download(self):
         try:
             cmd_args, url, output = self.build_command()
 
@@ -564,31 +596,12 @@ class MainWindow(QMainWindow):
                 self.waiting_list.append(item)
                 self.add_history_row(output_name=output, url=url)
                 return
-            
-            if type(manual_url) is str and type(manual_output) is str:
-                url = manual_url
-                output = manual_output
 
             self.log_output.clear()
             self.log_output.appendPlainText(f"Command: ffmpeg {' '.join(cmd_args)}\n")
             self.log_output.appendPlainText("Starting FFmpeg process...\n")
-            
-            self.progress_bar.setValue(0)
-            #self.btn_start.setEnabled(False)
-            self.btn_cancel.setEnabled(True)
-            #self.url_input.setEnabled(False)
-            #self.output_input.setEnabled(False)
-            
-            # Add to history table
-            output_name = os.path.basename(output)
-            self.current_row = self.add_history_row(output_name, url, "Downloading...")
-            
-            self.worker = FFmpegWorker(cmd_args)
-            self.worker.progress.connect(self.handle_progress)
-            self.worker.status.connect(self.status_bar.showMessage)
-            self.worker.log.connect(self.append_log)
-            self.worker.finished.connect(self.download_finished)
-            self.worker.start()
+
+            self._start_download(url, output)
             
         except ValueError as e:
             QMessageBox.warning(self, "Input Error", str(e))
