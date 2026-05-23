@@ -564,7 +564,12 @@ class MainWindow(QMainWindow):
             self._start_download(url, output)
 
     def _start_download(self, url, output):
-        try:            
+        try:           
+            if os.path.exists(output):
+                if QMessageBox.question(None, "File exists", f'The file "{output}" exists. Rewrite?') == QMessageBox.StandardButton.Ok:
+                    pass
+                else:
+                    return 
             self.progress_bar.setValue(0)
             self.btn_cancel.setEnabled(True)
             
@@ -631,6 +636,7 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("Cancelling...")
             if self.current_row >= 0:
                 self.update_history_status(self.current_row, "Cancelled")
+        self.waiting_list = []
     
     def download_finished(self, success, message):
         self.btn_start.setEnabled(True)
