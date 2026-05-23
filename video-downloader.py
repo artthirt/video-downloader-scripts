@@ -591,6 +591,12 @@ class MainWindow(QMainWindow):
         try:
             cmd_args, url, output = self.build_command()
 
+            if os.path.exists(output):
+                if QMessageBox.question(None, "File exists", f'The file "{output}" exists. Rewrite?') == QMessageBox.StandardButton.Ok:
+                    pass
+                else:
+                    return
+
             if self.is_running():
                 item = DownloadHistoryItem(url, output)
                 self.waiting_list.append(item)
