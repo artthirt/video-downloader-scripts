@@ -16,6 +16,7 @@ from PySide6.QtCore import Qt, QSettings, QStringListModel, QModelIndex
 from PySide6.QtGui import QFont, QPalette, QColor, QCloseEvent
 
 from ffmpeg_worker import FFmpegWorker
+from filehistorycombo import FileHistoryCombo
 
 
 class ComboWithPlaceholder(QComboBox):
@@ -257,7 +258,7 @@ class MainWindow(QMainWindow):
         input_layout.addWidget(self.clipboard_btn, 0, 3)
 
         input_layout.addWidget(QLabel("Output File:"), 1, 0)
-        self.output_input = ComboWithPlaceholder()
+        self.output_input = FileHistoryCombo(".") #ComboWithPlaceholder()
         self.output_input.setEditable(True)
         self.output_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.output_input.setPlaceholderText("output.mp4")
