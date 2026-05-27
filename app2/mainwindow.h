@@ -74,6 +74,7 @@ private slots:
     void onActionCopyFileNameToOutput(bool);
 
     void on_tbtPastFromClipboard_clicked();
+    void on_tbtClearListOutput_clicked();
 
 private:
     void setupConnections();

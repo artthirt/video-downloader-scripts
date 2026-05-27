@@ -56,6 +56,8 @@ MainWindow::MainWindow(QWidget *parent)
     ui->history_table->setContextMenuPolicy(Qt::ContextMenuPolicy::CustomContextMenu);
     connect(ui->history_table, &QTableWidget::customContextMenuRequested, this, &MainWindow::show_context_menu);
 
+    ui->splitter->setSizes({650, 350});
+
     loadSettings();
 }
 
@@ -446,4 +448,9 @@ void MainWindow::on_tbtPastFromClipboard_clicked()
     if(md->hasText()){
         ui->lineEditUrl->setCurrentText(md->text());
     }
+}
+
+void MainWindow::on_tbtClearListOutput_clicked()
+{
+    ui->lineEditOutput->setCurrentText("");
 }

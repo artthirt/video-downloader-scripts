@@ -40,6 +40,7 @@ set(SOURCES
 
 add_executable(${PROJECT_NAME} WIN32 MACOSX_BUNDLE
     ${SOURCES}
+    filehistorycombo.h filehistorycombo.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${FFMPEG_INCLUDE_DIRS})
