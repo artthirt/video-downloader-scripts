@@ -272,6 +272,7 @@ int MainWindow::add_history_row(const QString &output, const QString &url, const
 
     auto name_item = new QTableWidgetItem(output);
     name_item->setToolTip(output);
+    name_item->setData(Qt::UserRole, row);
     ui->history_table->setItem(row, 0, name_item);
 
     auto url_item = new QTableWidgetItem(url);

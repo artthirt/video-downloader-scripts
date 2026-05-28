@@ -78,6 +78,7 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.download_history = []
         self.waiting_list = []
+        self._NumRowId = 0x100
         self.current_row = -1  # Track which row is currently downloading
         
         self.setup_ui()
@@ -471,6 +472,7 @@ class MainWindow(QMainWindow):
         # Output Name
         name_item = QTableWidgetItem(output_name)
         name_item.setToolTip(output_name)
+        name_item.setData(self._NumRowId, row)
         self.history_table.setItem(row, 0, name_item)
         
         # URL
@@ -492,6 +494,12 @@ class MainWindow(QMainWindow):
     
     def update_history_status(self, row, status):
         """Update the status column of a specific row."""
+        
+        for i in range(self.history_table.rowCount()):
+            id = int(self.history_table.item(i, 0).data(self._NumRowId))
+            if id == row:
+                row = i
+                break
         if 0 <= row < self.history_table.rowCount():
             self.history_table.item(row, 2).setText(status)
             self.download_history[row].status = status
@@ -532,6 +540,7 @@ class MainWindow(QMainWindow):
     def build_command(self):
         url = self.url_input.currentText().strip()
         output = self.output_input.currentText().strip() or "output.mp4"
+        output = output if output.endswith(".mp4") else output + ".mp4"
         
         if not url:
             raise ValueError("Please enter a valid M3U8 URL")
@@ -580,7 +589,7 @@ class MainWindow(QMainWindow):
             
             cmd_args = self.build_cmd(url, output)
 
-            self.worker = FFmpegWorker(cmd_args)
+            self.worker = FFmpegWorker(cmd_args, self.current_row)
             self.worker.progress.connect(self.handle_progress)
             self.worker.status.connect(self.status_bar.showMessage)
             self.worker.log.connect(self.append_log)

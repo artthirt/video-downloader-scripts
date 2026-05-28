@@ -9,13 +9,14 @@ class FFmpegWorker(QThread):
     log = Signal(str)
     finished = Signal(bool, str)
     
-    def __init__(self, cmd_args, parent=None):
+    def __init__(self, cmd_args, id, parent=None):
         super().__init__(parent)
         self.cmd_args = cmd_args
         self.process = None
         self._is_running = True
         self.duration_seconds = 0
         self.duration_found = False
+        self.id = id
 
     def is_running(self):
         return self._is_running
