@@ -3,3 +3,5 @@ Bin
 *.user
 *.exe
 *.dll
+/app2/vcpkg-ffmpeg
+/__pycache__
