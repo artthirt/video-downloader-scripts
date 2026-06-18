@@ -16,7 +16,7 @@ from PySide6.QtCore import Qt, QSettings, QStringListModel, QModelIndex
 from PySide6.QtGui import QFont, QPalette, QColor, QCloseEvent
 
 from ffmpeg_worker import FFmpegWorker
-from filehistorycombo import FileHistoryCombo
+from filehistorycombo import FileHistoryCombo, get_unique_filepath, get_unique_filename
 
 
 class ComboWithPlaceholder(QComboBox):
@@ -510,6 +510,13 @@ class MainWindow(QMainWindow):
         self.download_history = []
         self.current_row = -1
 
+    def get_unique_history_output(self, output: str):
+        for item in self.download_history:
+            item_output = item.output
+            output = get_unique_filename(output, item_output)
+        return output
+
+
     def build_cmd(self, url, output):
         cmd = ['-hide_banner', '-nostdin', '-stats']  # -stats forces progress output
         cmd.extend(['-i', url])
@@ -541,6 +548,9 @@ class MainWindow(QMainWindow):
         url = self.url_input.currentText().strip()
         output = self.output_input.currentText().strip() or "output.mp4"
         output = output if output.endswith(".mp4") else output + ".mp4"
+
+        output = get_unique_filepath(output)
+        output = self.get_unique_history_output(output)
         
         if not url:
             raise ValueError("Please enter a valid M3U8 URL")
@@ -576,7 +586,7 @@ class MainWindow(QMainWindow):
     def _start_download(self, url, output):
         try:           
             if os.path.exists(output):
-                if QMessageBox.question(None, "File exists", f'The file "{output}" exists. Rewrite?') == QMessageBox.StandardButton.Ok:
+                if QMessageBox.question(None, "File exists", f'The file "{output}" exists. Rewrite?', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
                     pass
                 else:
                     return 
@@ -607,7 +617,7 @@ class MainWindow(QMainWindow):
             cmd_args, url, output = self.build_command()
 
             if os.path.exists(output):
-                if QMessageBox.question(None, "File exists", f'The file "{output}" exists. Rewrite?') == QMessageBox.StandardButton.Ok:
+                if QMessageBox.question(None, "File exists", f'The file "{output}" exists. Rewrite?', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
                     pass
                 else:
                     return

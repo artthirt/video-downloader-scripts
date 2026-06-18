@@ -1,5 +1,7 @@
 import os
 import sys
+from pathlib import Path
+from typing import Union
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -9,6 +11,40 @@ from PySide6.QtWidgets import (
     QStyle,
 )
 from PySide6.QtGui import QAction
+
+def get_unique_filepath(filepath: Union[str, Path]) -> str:
+    path = Path(filepath)
+    
+    # If the file doesn't exist, return the original path as a string
+    if not path.exists():
+        return str(path)
+    
+    stem = path.stem
+    suffix = path.suffix
+    parent = path.parent
+    
+    counter = 1
+    while True:
+        # Construct new filename: original_name_copy_1.ext
+        new_filename = f"{stem}_copy_{counter}{suffix}"
+        new_path = parent / new_filename
+        
+        if not new_path.exists():
+            return str(new_path)
+        
+        counter += 1
+
+def get_unique_filename(filepath1: str, filepath2: str):
+    if filepath1 != filepath2:
+        return filepath1
+    path = Path(filepath1)
+    stem = path.stem
+    suffix = path.suffix
+    parent = path.parent
+    counter = 1
+    new_filename = f"{stem}_copy_{counter}{suffix}"
+    return str(new_filename)
+
 
 class FileHistoryCombo(QComboBox):
     def __init__(self, base_dir: str, parent=None):
