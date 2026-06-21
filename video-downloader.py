@@ -520,6 +520,7 @@ class MainWindow(QMainWindow):
     def build_cmd(self, url, output):
         cmd = ['-hide_banner', '-nostdin', '-stats']  # -stats forces progress output
         cmd.extend(['-i', url])
+        cmd.extend(['-user_agent', "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"])
         
         if self.copy_checkbox.isChecked():
             cmd.extend(['-c', 'copy'])
