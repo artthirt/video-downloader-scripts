@@ -101,8 +101,10 @@ class FFmpegWorker(QThread):
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,  # Merge stderr into stdout
-                bufsize=1,  # Line buffered
-                universal_newlines=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
                 creationflags=creationflags
             )
             
