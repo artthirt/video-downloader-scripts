@@ -1,26 +1,32 @@
 import subprocess
 import re
 import sys
+from collections import deque
 from PySide6.QtCore import Signal, QThread
+
 
 class FFmpegWorker(QThread):
     progress = Signal(int)
     status = Signal(str)
     log = Signal(str)
     finished = Signal(bool, str)
-    
-    def __init__(self, cmd_args, id, parent=None):
+    duration_found = Signal(bool)
+
+    def __init__(self, cmd_args, id=-1, parent=None, ffmpeg_path=None):
         super().__init__(parent)
         self.cmd_args = cmd_args
+        self.ffmpeg_path = ffmpeg_path
         self.process = None
         self._is_running = True
         self.duration_seconds = 0
-        self.duration_found = False
+        self._duration_found = False
+        self._live_reported = False
+        self._tail = deque(maxlen=6)
         self.id = id
 
     def is_running(self):
         return self._is_running
-        
+
     def time_to_seconds(self, time_str):
         try:
             parts = time_str.split(':')
@@ -28,32 +34,61 @@ class FFmpegWorker(QThread):
             minutes = float(parts[1])
             seconds = float(parts[2])
             return hours * 3600 + minutes * 60 + seconds
-        except:
+        except (ValueError, IndexError):
             return 0
-    
+
     def stop(self):
+        """Stop the download.
+
+        Asks ffmpeg to quit gracefully ('q' on stdin) so it can finalize the
+        output file; falls back to terminate/kill if it does not exit in time.
+        Blocks until the process is gone, so call it only from a place where a
+        short pause is acceptable (cancel button / window close).
+        """
         self._is_running = False
-        if self.process:
+        proc = self.process
+        if not proc or proc.poll() is not None:
+            return
+        try:
+            # stdin is a *text* stream (Popen text=True), so send a str, not
+            # bytes; the newline lets ffmpeg delimit the 'q' command reliably.
+            if proc.stdin and not proc.stdin.closed:
+                proc.stdin.write("q\n")
+                proc.stdin.flush()
+                proc.stdin.close()
+        except (OSError, ValueError):
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
             try:
-                self.process.terminate()
-                self.process.wait(timeout=3)
-            except:
-                self.process.kill()
-    
+                proc.terminate()
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+
     def parse_line(self, line):
         """Parse a single line of FFmpeg output"""
-        # Log the line
+        # Log the line and remember recent lines for error reporting.
         self.log.emit(line + '\n')
-        
+        self._tail.append(line)
+
         # Parse duration (only once)
-        if not self.duration_found:
+        if not self._duration_found:
             duration_match = re.search(r'Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})', line)
             if duration_match:
                 time_str = f"{duration_match.group(1)}:{duration_match.group(2)}:{duration_match.group(3)}"
                 self.duration_seconds = self.time_to_seconds(time_str)
-                self.duration_found = True
+                self._duration_found = True
                 self.status.emit(f"Duration: {time_str} ({int(self.duration_seconds)}s)")
-        
+                self.duration_found.emit(True)
+
         # Parse progress
         if self.duration_seconds > 0:
             time_match = re.search(r'time=(\d{2}):(\d{2}):(\d{2}\.\d{2})', line)
@@ -68,6 +103,10 @@ class FFmpegWorker(QThread):
             frame_match = re.search(r'frame=\s*(\d+)', line)
             size_match = re.search(r'size=\s*(\d+)kB', line)
             fps_match = re.search(r'fps=\s*(\d+)', line)
+            if (frame_match or size_match) and not self._live_reported:
+                # Progress output without a known duration -> live stream.
+                self._live_reported = True
+                self.duration_found.emit(False)
             if frame_match or size_match:
                 info = []
                 if frame_match:
@@ -77,57 +116,64 @@ class FFmpegWorker(QThread):
                 if size_match:
                     info.append(f"{int(size_match.group(1))/1024:.1f}MB")
                 self.status.emit(f"Downloading... {' | '.join(info)}")
-    
+
     def run(self):
         self.status.emit("Starting FFmpeg...")
-        
+
         try:
-            # CRITICAL FIX: Use subprocess with unbuffered output
-            # -stderr=subprocess.STDOUT merges stderr into stdout
-            # -bufsize=1 enables line buffering
-            # -universal_newlines=True for text mode
-            
-            cmd = ['ffmpeg'] + self.cmd_args
-            
+            cmd = [self.ffmpeg_path or 'ffmpeg'] + list(self.cmd_args)
+
             self.log.emit(f"Executing: {' '.join(cmd)}\n")
             self.log.emit("-" * 50 + "\n")
-            
+
             # Use CREATE_NO_WINDOW on Windows to prevent console popup
             creationflags = 0
             if sys.platform == 'win32':
                 creationflags = subprocess.CREATE_NO_WINDOW
-            
+
+            # stdin is a pipe so stop() can send 'q' for a graceful shutdown.
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,  # Merge stderr into stdout
+                stdin=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
                 creationflags=creationflags
             )
-            
+
             # Read output line by line
             for line in self.process.stdout:
                 if not self._is_running:
-                    self.process.terminate()
+                    self.stop()
                     self.finished.emit(False, "Download cancelled by user")
                     return
-                
+
                 line = line.rstrip()
                 if line:
                     self.parse_line(line)
-            
+
             # Wait for process to complete
             self.process.wait()
-            
+
+            if not self._is_running:
+                # stop() asked ffmpeg to quit; it exits with code 0 after
+                # finalizing the file, so report cancellation, not success.
+                self.finished.emit(False, "Download cancelled by user")
+                return
+
             if self.process.returncode == 0:
                 self.progress.emit(100)
                 self.finished.emit(True, "Download completed successfully!")
             else:
-                self.finished.emit(False, f"FFmpeg exited with code {self.process.returncode}")
-                
+                message = f"FFmpeg exited with code {self.process.returncode}."
+                tail = [l for l in list(self._tail)[-3:] if l.strip()]
+                if tail:
+                    message += "\nLast output:\n" + "\n".join(tail)
+                self.finished.emit(False, message)
+
         except Exception as e:
             self._is_running = False
             self.finished.emit(False, f"Error: {str(e)}")

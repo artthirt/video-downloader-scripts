@@ -1,3 +1,5 @@
+import re
+import shutil
 import sys
 import subprocess
 import os
@@ -16,7 +18,27 @@ from PySide6.QtCore import Qt, QSettings, QStringListModel, QModelIndex
 from PySide6.QtGui import QFont, QPalette, QColor, QCloseEvent
 
 from ffmpeg_worker import FFmpegWorker
-from filehistorycombo import FileHistoryCombo, get_unique_filepath, get_unique_filename
+from filehistorycombo import FileHistoryCombo
+
+
+def find_ffmpeg():
+    """Locate the ffmpeg executable.
+
+    Search order: next to the running executable (standalone builds),
+    current working directory (development layout with a local ffmpeg.exe),
+    then PATH. Returns None when nothing is found.
+    """
+    exe_name = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+    candidates = []
+    try:
+        candidates.append(Path(sys.executable).parent / exe_name)
+    except Exception:
+        pass
+    candidates.append(Path.cwd() / exe_name)
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return shutil.which("ffmpeg")
 
 
 class ComboWithPlaceholder(QComboBox):
@@ -35,7 +57,7 @@ class ComboWithPlaceholder(QComboBox):
 
 class DownloadHistoryItem:
     """Represents a single download history entry"""
-    def __init__(self, url="", output="", status="Pending", progress=0, timestamp=""):
+    def __init__(self, url="", output="", status="Queued", progress=0, timestamp=""):
         self.url = url
         self.output = output
         self.status = status  # Pending, Downloading, Downloaded, Failed, Cancelled
@@ -64,7 +86,7 @@ class DownloadHistoryItem:
         return cls(
             url=data.get("url", ""),
             output=data.get("output", ""),
-            status=data.get("status", "Pending"),
+            status=data.get("status", "Queued"),
             progress=data.get("progress", 0),
             timestamp=data.get("timestamp", "")
         )
@@ -80,12 +102,24 @@ class MainWindow(QMainWindow):
         self.waiting_list = []
         self._NumRowId = 0x100
         self.current_row = -1  # Track which row is currently downloading
+        self.ffmpeg_path = find_ffmpeg()
         
         self.setup_ui()
         self.check_ffmpeg()
         self.load_history()
 
     def closeEvent(self, event: QCloseEvent):
+        if self.is_running():
+            answer = QMessageBox.question(
+                self, "Download in progress",
+                "A download is still running.\nCancel it and exit?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if answer != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+            # stop() blocks until the process has exited (graceful 'q' first).
+            self.worker.stop()
+            self.worker.wait(10_000)
         self.saveSettings()
         self.save_history()
         event.accept()
@@ -93,19 +127,20 @@ class MainWindow(QMainWindow):
     def loadSettings(self):
         settings = QSettings()
         listUrl = settings.value("list_url")
-        if type(listUrl)  is list:
-            if not ("" in listUrl):
-                listUrl.insert(0, "")
+        if type(listUrl) is list:
+            # Skip empty entries (old settings may contain a "" row from
+            # a previous version of this code). The fields show their
+            # placeholder text when empty; the clear buttons (\u274c) clear them.
+            listUrl = [x for x in listUrl if x]
             self.url_input.addItems(listUrl)
+            self.url_input.setCurrentIndex(-1)
 
         listOut = settings.value("list_out")
         if type(listOut) is list:
-            if not ("" in listOut):
-                listOut.insert(0, "")
+            listOut = [x for x in listOut if x]
             self.output_input.addItems(listOut)
-            self.output_model.setStringList(listOut)   
-        #if len(listUrl) > 0:
-        #    self.url_input.setCurrentIndex(0)
+            self.output_model.setStringList(listOut)
+            self.output_input.setCurrentIndex(-1)
 
     def saveSettings(self):
         settings = QSettings()
@@ -147,25 +182,23 @@ class MainWindow(QMainWindow):
         settings.setValue("download_history", history_data)
 
     def addOut(self, val):
-        listOut = []
-        for x in range(self.output_input.count()):
-            listOut.append(self.output_input.itemText(x))
-        if val in listOut:
+        # Record the value in the dropdown history without rebuilding the combo.
+        # clear() + addItems() on an editable combo snaps it back to index 0 and
+        # overwrites the line edit with the first entry (often "" or a stale value);
+        # inserting a row leaves the current text and selection untouched.
+        if self.output_input.findText(val) != -1:
             return
-        listOut.append(val)
-        self.output_input.clear()
-        self.output_input.addItems(listOut)  
-        self.output_model.setStringList(listOut)   
+        self.output_input.insertItem(self.output_input.count(), val)
+        # Keep the completer model in sync with the combo (QStringListModel has
+        # no single-item insert; resync the whole list).
+        self.output_model.setStringList(
+            [self.output_input.itemText(i) for i in range(self.output_input.count())]
+        )
 
     def addUrl(self, url):
-        listUrls = []
-        for x in range(self.url_input.count()):
-            listUrls.append(self.url_input.itemText(x))
-        if url in listUrls:
+        if self.url_input.findText(url) != -1:
             return
-        listUrls.append(url)
-        self.url_input.clear()
-        self.url_input.addItems(listUrls)     
+        self.url_input.insertItem(self.url_input.count(), url)
 
     def clear_url(self):
         self.url_input.setCurrentText("")   
@@ -211,8 +244,14 @@ class MainWindow(QMainWindow):
         )
 
         if action == action_remove:
+            name_item = self.history_table.item(row, 0)
+            row_id = int(name_item.data(self._NumRowId)) if name_item is not None else -1
+            if row_id == self.current_row:
+                # The active download keeps running but loses its UI tracking.
+                self.current_row = -1
             self.history_table.removeRow(row)
             del self.download_history[row]
+            self.save_history()
         elif action == action_copy_file:
             name = self.download_history[row].output
             QApplication.clipboard().setText(name)
@@ -350,7 +389,6 @@ class MainWindow(QMainWindow):
         self.history_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.history_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.history_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.history_table.setMaximumBlockCount = 1000  # Visual limit
         self.history_table.setAlternatingRowColors(True)
         self.history_table.setMinimumWidth(350)
         self.history_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -442,19 +480,25 @@ class MainWindow(QMainWindow):
             self.output_input.setCurrentText(file_path)
     
     def check_ffmpeg(self):
-        try:
-            result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
-            version_line = result.stdout.split('\n')[0]
-            self.status_bar.showMessage(f"FFmpeg detected: {version_line[:50]}...")
-        except FileNotFoundError:
+        if not self.ffmpeg_path:
             QMessageBox.critical(
                 self, "FFmpeg Not Found",
-                "FFmpeg is not installed or not in PATH.\n\n"
+                "FFmpeg was not found next to the app or in PATH.\n\n"
                 "Please install FFmpeg first:\n"
                 "• Windows: Download from ffmpeg.org and add to PATH\n"
                 "• macOS: brew install ffmpeg\n"
                 "• Linux: sudo apt install ffmpeg"
             )
+            self.btn_start.setEnabled(False)
+            self.status_bar.showMessage("FFmpeg not found - downloads disabled")
+            return
+        try:
+            result = subprocess.run([self.ffmpeg_path, '-version'], capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+            version_line = result.stdout.split('\n')[0]
+            self.status_bar.showMessage(f"FFmpeg detected: {version_line[:50]}...")
+        except OSError as e:
+            QMessageBox.critical(self, "FFmpeg Error", f"Failed to run ffmpeg:\n{e}")
+            self.btn_start.setEnabled(False)
     
     def add_history_row(self, output_name, url, status="Queued"):
         """Add a new row to the history table and return the row index."""
@@ -495,14 +539,17 @@ class MainWindow(QMainWindow):
     def update_history_status(self, row, status):
         """Update the status column of a specific row."""
         
+        target = -1
         for i in range(self.history_table.rowCount()):
-            id = int(self.history_table.item(i, 0).data(self._NumRowId))
-            if id == row:
-                row = i
+            item = self.history_table.item(i, 0)
+            if item is not None and int(item.data(self._NumRowId)) == row:
+                target = i
                 break
-        if 0 <= row < self.history_table.rowCount():
-            self.history_table.item(row, 2).setText(status)
-            self.download_history[row].status = status
+        # No match (e.g. the active row was removed from the table): skip
+        # instead of falling back to a possibly wrong index.
+        if 0 <= target < len(self.download_history):
+            self.history_table.item(target, 2).setText(status)
+            self.download_history[target].status = status
     
     def clear_history(self):
         """Clear all rows from the history table."""
@@ -510,17 +557,13 @@ class MainWindow(QMainWindow):
         self.download_history = []
         self.current_row = -1
 
-    def get_unique_history_output(self, output: str):
-        for item in self.download_history:
-            item_output = item.output
-            output = get_unique_filename(output, item_output)
-        return output
-
-
     def build_cmd(self, url, output):
-        cmd = ['-hide_banner', '-nostdin', '-stats']  # -stats forces progress output
-        cmd.extend(['-i', url])
+        cmd = ['-hide_banner', '-stats']  # -stats forces progress output
+        if url.lower().startswith(("http://", "https://")):
+            # Resilience against flaky HLS sources (input options)
+            cmd.extend(['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'])
         cmd.extend(['-user_agent', "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"])
+        cmd.extend(['-i', url])
         
         if self.copy_checkbox.isChecked():
             cmd.extend(['-c', 'copy'])
@@ -548,11 +591,11 @@ class MainWindow(QMainWindow):
     def build_command(self):
         url = self.url_input.currentText().strip()
         output = self.output_input.currentText().strip() or "output.mp4"
-        output = output if output.endswith(".mp4") else output + ".mp4"
+        # Only force .mp4 when no known media extension is present, so that
+        # e.g. ".mkv" (useful for HLS streams with AC-3 audio) is respected.
+        if not re.search(r'\.(mp4|mkv|mov|m4v|webm|ts|avi)$', output, re.IGNORECASE):
+            output += ".mp4"
 
-        output = get_unique_filepath(output)
-        output = self.get_unique_history_output(output)
-        
         if not url:
             raise ValueError("Please enter a valid M3U8 URL")
         
@@ -569,28 +612,34 @@ class MainWindow(QMainWindow):
         return not self.worker is None and self.worker.is_running()
     
     def check_waiting_list(self):
-        if len(self.waiting_list) == 0:
+        if not self.waiting_list:
             return
-        
-        for item in self.waiting_list:
-            print(f'{item.output}: {item.url}')
 
         item = self.waiting_list.pop(0)
-        if item is None:
-            return
-        url = item.url
-        output = item.output
-        print(f'Begin download: {item.output}: {item.url}')
+        if self.waiting_list:
+            self.status_bar.showMessage(f"Queue: {len(self.waiting_list)} waiting")
         if not self.is_running():
-            self._start_download(url, output)
+            self._start_download(item.url, item.output)
+
+    def confirm_overwrite(self, output: str) -> bool:
+        """Ask the user before overwriting an existing file.
+
+        Returns True when the download may proceed (file absent or overwrite
+        accepted), False when the user declined and the download must abort.
+        """
+        if not os.path.exists(output):
+            return True
+        answer = QMessageBox.question(
+            self, "File exists",
+            f'The file "{output}" already exists.\nOverwrite it?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        return answer == QMessageBox.StandardButton.Yes
 
     def _start_download(self, url, output):
         try:           
-            if os.path.exists(output):
-                if QMessageBox.question(None, "File exists", f'The file "{output}" exists. Rewrite?', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-                    pass
-                else:
-                    return 
+            if not self.confirm_overwrite(output):
+                return
+            self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
             self.btn_cancel.setEnabled(True)
             
@@ -600,10 +649,11 @@ class MainWindow(QMainWindow):
             
             cmd_args = self.build_cmd(url, output)
 
-            self.worker = FFmpegWorker(cmd_args, self.current_row)
+            self.worker = FFmpegWorker(cmd_args, self.current_row, ffmpeg_path=self.ffmpeg_path)
             self.worker.progress.connect(self.handle_progress)
             self.worker.status.connect(self.status_bar.showMessage)
             self.worker.log.connect(self.append_log)
+            self.worker.duration_found.connect(self.handle_duration)
             self.worker.finished.connect(self.download_finished)
             self.worker.start()
 
@@ -617,22 +667,18 @@ class MainWindow(QMainWindow):
         try:
             cmd_args, url, output = self.build_command()
 
-            if os.path.exists(output):
-                if QMessageBox.question(None, "File exists", f'The file "{output}" exists. Rewrite?', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-                    pass
-                else:
-                    return
+            if not self.confirm_overwrite(output):
+                return
 
             if self.is_running():
                 item = DownloadHistoryItem(url, output)
                 self.waiting_list.append(item)
-                self.add_history_row(output_name=output, url=url)
+                # Same (url, basename) key as _start_download so the queued row
+                # is reused instead of duplicated when the download starts.
+                self.add_history_row(output_name=os.path.basename(output), url=url, status="Queued")
                 return
 
-            self.log_output.clear()
-            self.log_output.appendPlainText(f"Command: ffmpeg {' '.join(cmd_args)}\n")
-            self.log_output.appendPlainText("Starting FFmpeg process...\n")
-
+            self.log_output.appendPlainText(f"\n--- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
             self._start_download(url, output)
             
         except ValueError as e:
@@ -645,6 +691,15 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(value)
         if(self.current_row >= 0):
             self.update_history_status(self.current_row, f"Downloading... {value}%")
+
+    def handle_duration(self, found: bool):
+        """Switch the progress bar between determinate and indeterminate mode."""
+        if found:
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+        else:
+            # Live stream without a known duration - spin instead of freezing at 0%.
+            self.progress_bar.setRange(0, 0)
     
     def append_log(self, text):
         self.log_output.insertPlainText(text)
@@ -660,25 +715,27 @@ class MainWindow(QMainWindow):
         self.waiting_list = []
     
     def download_finished(self, success, message):
-        self.btn_start.setEnabled(True)
         self.btn_cancel.setEnabled(False)
-        self.url_input.setEnabled(True)
-        self.output_input.setEnabled(True)
-        
+
+        lines = (message or "").splitlines()
+        first_line = lines[0] if lines else ""
+
         if success:
+            self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(100)
             if self.current_row >= 0:
                 self.update_history_status(self.current_row, "Downloaded")
-            #QMessageBox.information(self, "Success", message)
         else:
+            self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
             if self.current_row >= 0:
-                self.update_history_status(self.current_row, f"Failed: {message[:50]}")
+                self.update_history_status(self.current_row, f"Failed: {first_line[:50]}")
             QMessageBox.warning(self, "Download Status", message)
-        
-        self.status_bar.showMessage(message)
+
+        self.status_bar.showMessage(first_line)
+        self.save_history()
         self.current_row = -1
-        self.worker = None        
+        self.worker = None
 
         self.check_waiting_list()
 

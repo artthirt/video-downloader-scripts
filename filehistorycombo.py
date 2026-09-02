@@ -43,7 +43,7 @@ def get_unique_filename(filepath1: str, filepath2: str):
     parent = path.parent
     counter = 1
     new_filename = f"{stem}_copy_{counter}{suffix}"
-    return str(new_filename)
+    return str(parent / new_filename)
 
 
 class FileHistoryCombo(QComboBox):
@@ -75,13 +75,9 @@ class FileHistoryCombo(QComboBox):
             super().setPlaceholderText(text)
 
     def update_state(self, file_name: str):
-        valid = (
-            bool(file_name)
-            and "/" not in file_name
-            and "\\" not in file_name
-        )
+        text = file_name.strip()
 
-        if not valid:
+        if not text:
             self.lineEdit().setStyleSheet(
                 "QLineEdit { border: 2px solid gray; }"
             )
@@ -92,11 +88,14 @@ class FileHistoryCombo(QComboBox):
                 )
             )
 
-            self.setToolTip("Invalid file name")
+            self.setToolTip("Enter a file name")
 
             return
 
-        full_path = os.path.join(self.base_dir, file_name)
+        # Plain names are resolved against base_dir; values containing path
+        # separators (e.g. from the Browse dialog) are used as-is.
+        is_path = "/" in text or "\\" in text
+        full_path = text if is_path else os.path.join(self.base_dir, text)
 
         if os.path.isfile(full_path):
             self.lineEdit().setStyleSheet(
