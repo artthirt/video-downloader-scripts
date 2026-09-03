@@ -14,12 +14,37 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 from PySide6.QtCore import Qt, QSettings, QStringListModel, QModelIndex
-from PySide6.QtGui import QPalette, QColor, QCloseEvent
+from PySide6.QtGui import QPalette, QColor, QCloseEvent, QIcon
 
 from filehistorycombo import FileHistoryCombo
 from models import DownloadHistoryItem, find_ffmpeg
 from widgets import ComboWithPlaceholder, LogDialog
 from download_queue import DownloadQueue
+
+
+def pick_icon_path():
+    """Locate the app icon next to the script (dev) or the exe (standalone)."""
+    base = Path(__file__).resolve().parent
+    candidates = [
+        base / "assets" / "icon.ico",
+        base / "assets" / "icon.png",
+        base / "icon.ico",
+        base / "icon.png",
+    ]
+    try:
+        exe_dir = Path(sys.executable).parent
+        candidates += [
+            exe_dir / "assets" / "icon.ico",
+            exe_dir / "assets" / "icon.png",
+            exe_dir / "icon.ico",
+            exe_dir / "icon.png",
+        ]
+    except Exception:
+        pass
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return None
 
 
 class MainWindow(QMainWindow):
@@ -750,6 +775,10 @@ if __name__ == '__main__':
     app.setOrganizationName("VideoTools")
     app.setApplicationName("MP4 Downloader")
 
+    icon_path = pick_icon_path()
+    if icon_path:
+        app.setWindowIcon(QIcon(icon_path))
+
     # Optional dark theme
     app.setStyle('Fusion')
     palette = QPalette()
@@ -768,5 +797,7 @@ if __name__ == '__main__':
     app.setPalette(palette)
 
     window = MainWindow()
+    if icon_path:
+        window.setWindowIcon(QIcon(icon_path))
     window.show()
     sys.exit(app.exec())
