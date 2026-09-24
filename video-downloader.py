@@ -520,13 +520,16 @@ class MainWindow(QMainWindow):
         status_item.setToolTip(status)
         self.history_table.setItem(row, 2, status_item)
 
-        # Per-row progress bar
-        bar = QProgressBar()
-        bar.setRange(0, 100)
-        bar.setValue(0)
-        bar.setTextVisible(True)
-        bar.setFixedHeight(22)
-        self.history_table.setCellWidget(row, 3, bar)
+        # Per-row progress bar. Only active (Queued/Downloading) rows get one;
+        # it fills the full cell height so it lines up with the row. Terminal
+        # rows (e.g. loaded history) leave the cell empty instead of showing a
+        # misleading empty bar next to a finished/failed entry.
+        if self._is_active_status(status):
+            bar = QProgressBar()
+            bar.setRange(0, 100)
+            bar.setValue(0)
+            bar.setTextVisible(True)
+            self.history_table.setCellWidget(row, 3, bar)
 
         # Scroll to the new row
         self.history_table.scrollToItem(status_item)
@@ -534,6 +537,10 @@ class MainWindow(QMainWindow):
         self.download_history.append(history_item)
 
         return row_id
+
+    def _is_active_status(self, status):
+        """True when the row is being worked on (bar should be visible)."""
+        return status == "Queued" or status.startswith("Downloading")
 
     def _find_row(self, row_id):
         """Return the table row index for an opaque row id, or -1 if absent."""
@@ -565,9 +572,13 @@ class MainWindow(QMainWindow):
         if r >= 0:
             self._set_row_status(r, "Downloading...")
             bar = self._bar_for(r)
-            if bar is not None:
+            if bar is None:
+                bar = QProgressBar()
                 bar.setRange(0, 100)
-                bar.setValue(0)
+                bar.setTextVisible(True)
+                self.history_table.setCellWidget(r, 3, bar)
+            bar.setRange(0, 100)
+            bar.setValue(0)
         self._update_global_bar()
 
     def _row_progress(self, row_id, pct):
@@ -578,6 +589,7 @@ class MainWindow(QMainWindow):
             self._set_row_status(r, f"Downloading... {pct}%")
             bar = self._bar_for(r)
             if bar is not None:
+                bar.show()
                 if bar.maximum() == 0:
                     bar.setRange(0, 100)
                 bar.setValue(pct)
@@ -609,21 +621,17 @@ class MainWindow(QMainWindow):
 
         r = self._find_row(row_id)
         if r >= 0:
-            bar = self._bar_for(r)
-            if bar is not None:
-                bar.setRange(0, 100)
             if success:
-                if bar is not None:
-                    bar.setValue(100)
                 self._set_row_status(r, "Downloaded")
             elif cancelled:
-                if bar is not None:
-                    bar.setValue(0)
                 self._set_row_status(r, "Cancelled")
             else:
-                if bar is not None:
-                    bar.setValue(0)
                 self._set_row_status(r, f"Failed: {first_line[:50]}")
+            # Terminal state: remove the per-row bar so finished rows leave an
+            # empty Progress cell (hide() on a cell widget doesn't stick, but
+            # clearing the cell widget does).
+            if self._bar_for(r) is not None:
+                self.history_table.setCellWidget(r, 3, None)
 
         if not success and not cancelled:
             QMessageBox.warning(self, "Download Status", message)
