@@ -51,7 +51,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("M3U8 to MP4 Downloader")
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(660, 600)
         self.download_history = []
         self._NumRowId = 0x100
         self._row_id_seq = 0      # monotonic opaque row id (never reused)
@@ -257,7 +257,7 @@ class MainWindow(QMainWindow):
         input_group = QGroupBox("Source & Destination")
         input_layout = QGridLayout(input_group)
 
-        input_layout.addWidget(QLabel("M3U8 URL:"), 0, 0)
+        input_layout.addWidget(QLabel("URL:"), 0, 0)
         self.url_input = ComboWithPlaceholder()
         self.url_input.setEditable(True)
         self.url_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -277,7 +277,7 @@ class MainWindow(QMainWindow):
         self.clipboard_btn.clicked.connect(self.clipboard_paste)
         input_layout.addWidget(self.clipboard_btn, 0, 3)
 
-        input_layout.addWidget(QLabel("Output File:"), 1, 0)
+        input_layout.addWidget(QLabel("File:"), 1, 0)
         self.output_input = FileHistoryCombo(".") #ComboWithPlaceholder()
         self.output_input.setEditable(True)
         self.output_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -316,6 +316,7 @@ class MainWindow(QMainWindow):
 
         codec_layout.addWidget(QLabel("Audio Filter:"))
         self.audio_filter = QComboBox()
+        self.audio_filter.setMinimumContentsLength(8)
         self.audio_filter.addItems(["aac_adtstoasc (default)", "none"])
         self.audio_filter.setEnabled(True)
         codec_layout.addWidget(self.audio_filter)
