@@ -51,7 +51,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("M3U8 to MP4 Downloader")
-        self.setMinimumSize(1100, 700)
+        self.setMinimumSize(900, 600)
         self.download_history = []
         self._NumRowId = 0x100
         self._row_id_seq = 0      # monotonic opaque row id (never reused)
@@ -308,7 +308,8 @@ class MainWindow(QMainWindow):
 
         codec_layout = QHBoxLayout()
 
-        self.copy_checkbox = QCheckBox("Copy streams (-c copy) - Fast, no re-encoding")
+        self.copy_checkbox = QCheckBox("Copy streams (-c copy)")
+        self.copy_checkbox.setToolTip("Fast, no re-encoding")
         self.copy_checkbox.setChecked(True)
         self.copy_checkbox.stateChanged.connect(self.toggle_encoding_options)
         codec_layout.addWidget(self.copy_checkbox)
