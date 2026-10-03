@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QCompleter, QTableWidget, QTableWidgetItem, QHeaderView,
     QMenu,
 )
-from PySide6.QtCore import Qt, QSettings, QStringListModel, QModelIndex
+from PySide6.QtCore import Qt, QSettings, QStringListModel, QModelIndex, QByteArray
 from PySide6.QtGui import QPalette, QColor, QCloseEvent, QIcon
 
 from filehistorycombo import FileHistoryCombo
@@ -118,6 +118,10 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):
             self.max_spinbox.setValue(1)
 
+        geo = settings.value("geometry")
+        if isinstance(geo, QByteArray):
+            self.restoreGeometry(geo)
+
     def saveSettings(self):
         settings = QSettings()
         listUrls = []
@@ -131,6 +135,7 @@ class MainWindow(QMainWindow):
         settings.setValue("list_out", listOut)
 
         settings.setValue("max_concurrent", self.max_spinbox.value())
+        settings.setValue("geometry", self.saveGeometry())
 
     def load_history(self):
         """Load download history from settings"""
@@ -374,10 +379,11 @@ class MainWindow(QMainWindow):
         self.history_table.setColumnCount(4)
         self.history_table.setHorizontalHeaderLabels(["Output Name", "URL", "Status", "Progress"])
         header = self.history_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        # All columns resizable by mouse (Interactive)
+        for col in range(self.history_table.columnCount()):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+        self.history_table.setColumnWidth(0, 200)
+        self.history_table.setColumnWidth(1, 340)
         self.history_table.setColumnWidth(3, 130)
         self.history_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.history_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
