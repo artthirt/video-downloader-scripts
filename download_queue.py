@@ -1,10 +1,5 @@
-"""Concurrency engine: run N ffmpeg downloads with a FIFO waiting list.
-
-This module owns scheduling and the worker lifecycle, and is deliberately
-decoupled from the GUI. It emits row-id-keyed signals so the window can update
-whichever table row / progress bar matches. The row id is an opaque key chosen
-by the caller (the UI uses the history-table row index at insert time).
-"""
+"""Concurrency engine: N ffmpeg downloads, FIFO wait list, GUI-free.
+Emits row-id-keyed signals; row id is an opaque caller-chosen key."""
 from PySide6.QtCore import QObject, Signal
 
 from ffmpeg_worker import FFmpegWorker
@@ -72,7 +67,7 @@ class DownloadQueue(QObject):
         try:
             cmd = self._build_cmd(url, output)
         except ValueError as e:
-            # Bad input: report as a failed row and keep pumping.
+            # bad input: report as failed row, keep pumping
             self.finished.emit(row_id, False, str(e))
             self.state_changed.emit()
             return
@@ -99,8 +94,7 @@ class DownloadQueue(QObject):
         worker = self.sender()
         row_id = worker.id
         self._active.pop(row_id, None)
-        # The thread has essentially ended (finished is the last emit in run());
-        # wait() is a cheap safety net before we drop our reference to it.
+        # thread is done (finished is the last emit); wait() as safety net
         worker.wait(2000)
         self.finished.emit(row_id, success, message)
         self.state_changed.emit()

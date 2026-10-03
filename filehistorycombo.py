@@ -15,7 +15,7 @@ from PySide6.QtGui import QAction
 def get_unique_filepath(filepath: Union[str, Path]) -> str:
     path = Path(filepath)
     
-    # If the file doesn't exist, return the original path as a string
+    # no existing file: return as-is
     if not path.exists():
         return str(path)
     
@@ -25,7 +25,7 @@ def get_unique_filepath(filepath: Union[str, Path]) -> str:
     
     counter = 1
     while True:
-        # Construct new filename: original_name_copy_1.ext
+        # name_copy_N.ext
         new_filename = f"{stem}_copy_{counter}{suffix}"
         new_path = parent / new_filename
         
@@ -92,8 +92,7 @@ class FileHistoryCombo(QComboBox):
 
             return
 
-        # Plain names are resolved against base_dir; values containing path
-        # separators (e.g. from the Browse dialog) are used as-is.
+        # plain names resolve against base_dir; paths are used as-is
         is_path = "/" in text or "\\" in text
         full_path = text if is_path else os.path.join(self.base_dir, text)
 

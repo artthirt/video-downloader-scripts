@@ -21,10 +21,7 @@ class ComboWithPlaceholder(QComboBox):
 
 
 class LogDialog(QDialog):
-    """A separate, non-modal window that shows the streaming FFmpeg log.
-
-    Created once and kept alive across show/hide so the log history is retained.
-    """
+    """Non-modal FFmpeg log window; kept alive across show/hide to retain history."""
 
     def __init__(self, parent=None):
         super().__init__(parent)

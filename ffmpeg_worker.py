@@ -38,20 +38,13 @@ class FFmpegWorker(QThread):
             return 0
 
     def stop(self):
-        """Stop the download.
-
-        Asks ffmpeg to quit gracefully ('q' on stdin) so it can finalize the
-        output file; falls back to terminate/kill if it does not exit in time.
-        Blocks until the process is gone, so call it only from a place where a
-        short pause is acceptable (cancel button / window close).
-        """
+        """Stop: ask ffmpeg to quit via 'q' on stdin, then terminate/kill. Blocks."""
         self._is_running = False
         proc = self.process
         if not proc or proc.poll() is not None:
             return
         try:
-            # stdin is a *text* stream (Popen text=True), so send a str, not
-            # bytes; the newline lets ffmpeg delimit the 'q' command reliably.
+            # stdin is a text stream: send str + newline
             if proc.stdin and not proc.stdin.closed:
                 proc.stdin.write("q\n")
                 proc.stdin.flush()
@@ -99,12 +92,12 @@ class FFmpegWorker(QThread):
                 self.progress.emit(percent)
                 self.status.emit(f"Downloading: {percent}% ({current_time_str})")
         else:
-            # For live streams, show frame count or size
+            # live stream: show frame/size
             frame_match = re.search(r'frame=\s*(\d+)', line)
             size_match = re.search(r'size=\s*(\d+)kB', line)
             fps_match = re.search(r'fps=\s*(\d+)', line)
             if (frame_match or size_match) and not self._live_reported:
-                # Progress output without a known duration -> live stream.
+                # no duration in output -> live stream
                 self._live_reported = True
                 self.duration_found.emit(False)
             if frame_match or size_match:
@@ -126,12 +119,12 @@ class FFmpegWorker(QThread):
             self.log.emit(f"Executing: {' '.join(cmd)}\n")
             self.log.emit("-" * 50 + "\n")
 
-            # Use CREATE_NO_WINDOW on Windows to prevent console popup
+            # no console popup on Windows
             creationflags = 0
             if sys.platform == 'win32':
                 creationflags = subprocess.CREATE_NO_WINDOW
 
-            # stdin is a pipe so stop() can send 'q' for a graceful shutdown.
+            # stdin pipe lets stop() send 'q'
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -159,8 +152,7 @@ class FFmpegWorker(QThread):
             self.process.wait()
 
             if not self._is_running:
-                # stop() asked ffmpeg to quit; it exits with code 0 after
-                # finalizing the file, so report cancellation, not success.
+                # exited via 'q' (code 0): report cancellation, not success
                 self.finished.emit(False, "Download cancelled by user")
                 return
 

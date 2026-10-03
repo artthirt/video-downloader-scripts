@@ -1,7 +1,4 @@
-"""Data model + non-GUI helpers shared by the downloader.
-
-Kept free of any QWidget so it can be imported and tested without a Qt app.
-"""
+"""Data model + non-GUI helpers (no QWidget imports)."""
 import shutil
 import sys
 from pathlib import Path
@@ -9,12 +6,7 @@ from datetime import datetime
 
 
 def find_ffmpeg():
-    """Locate the ffmpeg executable.
-
-    Search order: next to the running executable (standalone builds),
-    current working directory (development layout with a local ffmpeg.exe),
-    then PATH. Returns None when nothing is found.
-    """
+    """Find ffmpeg: next to the exe, in CWD, then PATH; None if absent."""
     exe_name = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
     candidates = []
     try:
@@ -52,7 +44,7 @@ class DownloadHistoryItem:
         return self.url == other.url and self.output == other.output
 
     def __hash__(self):
-        return hash((self.url, self.output))  # Only if objects are immutable
+        return hash((self.url, self.output))
 
     @classmethod
     def from_dict(cls, data):

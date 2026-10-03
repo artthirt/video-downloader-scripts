@@ -24,7 +24,7 @@ from download_queue import DownloadQueue
 
 
 def pick_icon_path():
-    """Locate the app icon next to the script (dev) or the exe (standalone)."""
+    """Find the app icon next to the script or the exe."""
     base = Path(__file__).resolve().parent
     candidates = [
         base / "assets" / "icon.ico",
@@ -89,7 +89,7 @@ class MainWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
-            # stop_all() blocks until every ffmpeg process has exited.
+            # blocks until ffmpeg exits
             self.queue.stop_all()
         self.saveSettings()
         self.save_history()
@@ -99,9 +99,7 @@ class MainWindow(QMainWindow):
         settings = QSettings()
         listUrl = settings.value("list_url")
         if type(listUrl) is list:
-            # Skip empty entries (old settings may contain a "" row from
-            # a previous version of this code). The fields show their
-            # placeholder text when empty; the clear buttons (❌) clear them.
+            # skip empty entries left by an older version
             listUrl = [x for x in listUrl if x]
             self.url_input.addItems(listUrl)
             self.url_input.setCurrentIndex(-1)
@@ -153,7 +151,7 @@ class MainWindow(QMainWindow):
 
                     if item in self.download_history:
                         continue
-                    # Reset "Downloading" status to "Failed" or "Pending" on load
+                    # reset stale "Downloading" rows
                     if item.status == "Downloading":
                         item.status = "Failed"
                         item.progress = 0
@@ -166,15 +164,11 @@ class MainWindow(QMainWindow):
         settings.setValue("download_history", history_data)
 
     def addOut(self, val):
-        # Record the value in the dropdown history without rebuilding the combo.
-        # clear() + addItems() on an editable combo snaps it back to index 0 and
-        # overwrites the line edit with the first entry (often "" or a stale value);
-        # inserting a row leaves the current text and selection untouched.
+        # insert, don't clear+addItems: rebuilding snaps the editable combo to index 0
         if self.output_input.findText(val) != -1:
             return
         self.output_input.insertItem(self.output_input.count(), val)
-        # Keep the completer model in sync with the combo (QStringListModel has
-        # no single-item insert; resync the whole list).
+        # resync completer model (no single-item insert)
         self.output_model.setStringList(
             [self.output_input.itemText(i) for i in range(self.output_input.count())]
         )
@@ -246,9 +240,7 @@ class MainWindow(QMainWindow):
             self.output_input.setCurrentText(name)
         elif action == action_cancel:
             self.queue.cancel_row(row_id)
-            # Waiting rows are dropped immediately (no finished signal for them),
-            # so reflect the cancellation right away; active rows are updated by
-            # the worker's finished signal.
+            # waiting rows drop without a finished signal; update now
             if not self.queue.is_row_active_or_waiting(row_id):
                 self._set_row_status(row, "Cancelled")
 
@@ -368,19 +360,19 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(options_group)
 
-        # Progress Section (global: average of active workers)
+        # Global progress (avg of active workers)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setValue(0)
         main_layout.addWidget(self.progress_bar)
 
-        # History Table (full width)
+        # History table
         self.history_table = QTableWidget()
         self.history_table.setColumnCount(4)
         self.history_table.setHorizontalHeaderLabels(["Output Name", "URL", "Status", "Progress"])
         header = self.history_table.horizontalHeader()
-        # All columns resizable by mouse (Interactive)
+        # columns mouse-resizable
         for col in range(self.history_table.columnCount()):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
         self.history_table.setColumnWidth(0, 200)
@@ -395,16 +387,14 @@ class MainWindow(QMainWindow):
             self.show_context_menu
         )
         self.history_table.doubleClicked.connect(self.historyDoubleClick)
-        # "Stretch first section": column 0 absorbs free horizontal space
-        # (mirror of stretchLastSection) while every section stays
-        # mouse-resizable; the last column stays glued to the right edge.
+        # stretch-first: col 0 absorbs free space, last col stays right
         self._cols_syncing = False
         self.history_table.horizontalHeader().sectionResized.connect(
             self._on_history_section_resized)
         self.history_table.viewport().installEventFilter(self)
         main_layout.addWidget(self.history_table, stretch=1)
 
-        # FFmpeg log lives in a separate window, opened on demand
+        # log lives in a separate window
         self.log_dialog = LogDialog(self)
 
         # Controls
@@ -443,7 +433,7 @@ class MainWindow(QMainWindow):
         self.loadSettings()
 
     # ---- history table: stretch-first column behavior --------------------
-    _COL_MIN = 40  # px, minimum width for any history column
+    _COL_MIN = 40  # min column width, px
 
     def _sync_first_column(self):
         """Column 0 = viewport width - sum(others); last col stays right."""
@@ -466,13 +456,8 @@ class MainWindow(QMainWindow):
         delta = new_width - old_width
         if delta == 0:
             return
-        # The grabbed border must move where the user drags it: the
-        # dragged column keeps the width Qt set, and the excess (or
-        # freed space) is absorbed by the columns to its RIGHT (nearest
-        # first), so the last column keeps its right edge and column 0
-        # (the stretch column) is left alone. If the right columns hit
-        # their 40 px minimum, the dragged column is limited so the
-        # total still fits the viewport.
+        # keep the dragged border where it was put: absorb the delta in the
+        # columns to its right (nearest first); clamp at _COL_MIN, else limit the drag
         self._cols_syncing = True
         try:
             for c in range(col + 1, table.columnCount()):
@@ -587,10 +572,7 @@ class MainWindow(QMainWindow):
         status_item.setToolTip(status)
         self.history_table.setItem(row, 2, status_item)
 
-        # Per-row progress bar. Only active (Queued/Downloading) rows get one;
-        # it fills the full cell height so it lines up with the row. Terminal
-        # rows (e.g. loaded history) leave the cell empty instead of showing a
-        # misleading empty bar next to a finished/failed entry.
+        # per-row bar only for active rows; terminal rows leave the cell empty
         if self._is_active_status(status):
             bar = QProgressBar()
             bar.setRange(0, 100)
@@ -694,9 +676,7 @@ class MainWindow(QMainWindow):
                 self._set_row_status(r, "Cancelled")
             else:
                 self._set_row_status(r, f"Failed: {first_line[:50]}")
-            # Terminal state: remove the per-row bar so finished rows leave an
-            # empty Progress cell (hide() on a cell widget doesn't stick, but
-            # clearing the cell widget does).
+            # terminal state: clear the cell widget (hide() doesn't stick on cell widgets)
             if self._bar_for(r) is not None:
                 self.history_table.setCellWidget(r, 3, None)
 
@@ -738,16 +718,14 @@ class MainWindow(QMainWindow):
         try:
             url = self.url_input.currentText().strip()
             output = self.output_input.currentText().strip() or "output.mp4"
-            # Only force .mp4 when no known media extension is present, so that
-            # e.g. ".mkv" (useful for HLS streams with AC-3 audio) is respected.
+            # force .mp4 only when no known media extension is present
             if not re.search(r'\.(mp4|mkv|mov|m4v|webm|ts|avi)$', output, re.IGNORECASE):
                 output += ".mp4"
 
             if not url:
                 raise ValueError("Please enter a valid M3U8 URL")
 
-            # Validate the command up front so bad extra args surface immediately
-            # (the queue would otherwise report it as a failed row).
+            # validate up front so bad extra args surface immediately
             self.build_cmd(url, output)
 
             if not self.confirm_overwrite(output):
@@ -769,11 +747,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", str(e))
 
     def confirm_overwrite(self, output: str) -> bool:
-        """Ask the user before overwriting an existing file.
-
-        Returns True when the download may proceed (file absent or overwrite
-        accepted), False when the user declined and the download must abort.
-        """
+        """Ask before overwriting an existing file; False aborts."""
         if not os.path.exists(output):
             return True
         answer = QMessageBox.question(
@@ -785,7 +759,7 @@ class MainWindow(QMainWindow):
     def cancel_all(self):
         if not self.queue.is_running() and self.queue.waiting_count() == 0:
             return
-        # Waiting rows are dropped without a finished signal; reflect it now.
+        # waiting rows drop without a finished signal; reflect now
         for rid in self.queue.waiting_row_ids():
             r = self._find_row(rid)
             if r >= 0:
@@ -796,7 +770,7 @@ class MainWindow(QMainWindow):
     def build_cmd(self, url, output):
         cmd = ['-hide_banner', '-stats']  # -stats forces progress output
         if url.lower().startswith(("http://", "https://")):
-            # Resilience against flaky HLS sources (input options)
+            # HLS reconnect options
             cmd.extend(['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'])
         cmd.extend(['-user_agent', "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"])
         cmd.extend(['-i', url])
@@ -825,7 +799,7 @@ class MainWindow(QMainWindow):
         return cmd
 
     def append_log(self, text):
-        # Write to the log window whether or not it is currently visible.
+        # log window appends even while hidden
         self.log_dialog.append(text)
 
     def toggle_log(self, checked):
