@@ -463,29 +463,29 @@ class MainWindow(QMainWindow):
         if self._cols_syncing:
             return
         table = self.history_table
-        if col == 0:
-            # User dragged the 0|1 border: keep the width they set for
-            # column 0 and transfer the delta to the other columns
-            # (starting with column 1), so the last column keeps its
-            # right edge. If the others hit their minimum, column 0 is
-            # limited so the total still fits the viewport.
-            delta = new_width - old_width
+        delta = new_width - old_width
+        if delta == 0:
+            return
+        # The grabbed border must move where the user drags it: the
+        # dragged column keeps the width Qt set, and the excess (or
+        # freed space) is absorbed by the columns to its RIGHT (nearest
+        # first), so the last column keeps its right edge and column 0
+        # (the stretch column) is left alone. If the right columns hit
+        # their 40 px minimum, the dragged column is limited so the
+        # total still fits the viewport.
+        self._cols_syncing = True
+        try:
+            for c in range(col + 1, table.columnCount()):
+                if delta == 0:
+                    break
+                cur = table.columnWidth(c)
+                target = max(self._COL_MIN, cur - delta)
+                table.setColumnWidth(c, target)
+                delta -= cur - target
             if delta != 0:
-                self._cols_syncing = True
-                try:
-                    for c in range(1, table.columnCount()):
-                        if delta == 0:
-                            break
-                        cur = table.columnWidth(c)
-                        target = max(self._COL_MIN, cur - delta)
-                        table.setColumnWidth(c, target)
-                        delta -= cur - target
-                    if delta != 0:
-                        table.setColumnWidth(0, new_width - delta)
-                finally:
-                    self._cols_syncing = False
-        else:
-            self._sync_first_column()
+                table.setColumnWidth(col, new_width - delta)
+        finally:
+            self._cols_syncing = False
 
     def eventFilter(self, obj, event):
         if (obj is self.history_table.viewport()
