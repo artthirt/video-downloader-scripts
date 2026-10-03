@@ -13,7 +13,8 @@ from PySide6.QtWidgets import (
     QCompleter, QTableWidget, QTableWidgetItem, QHeaderView,
     QMenu,
 )
-from PySide6.QtCore import Qt, QSettings, QStringListModel, QModelIndex, QByteArray
+from PySide6.QtCore import (Qt, QEvent, QSettings, QStringListModel,
+                             QModelIndex, QByteArray)
 from PySide6.QtGui import QPalette, QColor, QCloseEvent, QIcon
 
 from filehistorycombo import FileHistoryCombo
@@ -394,6 +395,13 @@ class MainWindow(QMainWindow):
             self.show_context_menu
         )
         self.history_table.doubleClicked.connect(self.historyDoubleClick)
+        # "Stretch first section": column 0 absorbs free horizontal space
+        # (mirror of stretchLastSection) while every section stays
+        # mouse-resizable; the last column stays glued to the right edge.
+        self._cols_syncing = False
+        self.history_table.horizontalHeader().sectionResized.connect(
+            self._on_history_section_resized)
+        self.history_table.viewport().installEventFilter(self)
         main_layout.addWidget(self.history_table, stretch=1)
 
         # FFmpeg log lives in a separate window, opened on demand
@@ -433,6 +441,57 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Ready")
 
         self.loadSettings()
+
+    # ---- history table: stretch-first column behavior --------------------
+    _COL_MIN = 40  # px, minimum width for any history column
+
+    def _sync_first_column(self):
+        """Column 0 = viewport width - sum(others); last col stays right."""
+        if self._cols_syncing:
+            return
+        table = self.history_table
+        self._cols_syncing = True
+        try:
+            others = sum(table.columnWidth(c) for c in range(1, table.columnCount()))
+            w0 = max(self._COL_MIN, table.viewport().width() - others)
+            if table.columnWidth(0) != w0:
+                table.setColumnWidth(0, w0)
+        finally:
+            self._cols_syncing = False
+
+    def _on_history_section_resized(self, col, old_width, new_width):
+        if self._cols_syncing:
+            return
+        table = self.history_table
+        if col == 0:
+            # User dragged the 0|1 border: keep the width they set for
+            # column 0 and transfer the delta to the other columns
+            # (starting with column 1), so the last column keeps its
+            # right edge. If the others hit their minimum, column 0 is
+            # limited so the total still fits the viewport.
+            delta = new_width - old_width
+            if delta != 0:
+                self._cols_syncing = True
+                try:
+                    for c in range(1, table.columnCount()):
+                        if delta == 0:
+                            break
+                        cur = table.columnWidth(c)
+                        target = max(self._COL_MIN, cur - delta)
+                        table.setColumnWidth(c, target)
+                        delta -= cur - target
+                    if delta != 0:
+                        table.setColumnWidth(0, new_width - delta)
+                finally:
+                    self._cols_syncing = False
+        else:
+            self._sync_first_column()
+
+    def eventFilter(self, obj, event):
+        if (obj is self.history_table.viewport()
+                and event.type() == QEvent.Type.Resize):
+            self._sync_first_column()
+        return super().eventFilter(obj, event)
 
     def toggle_encoding_options(self, state):
         copy_enabled = state == Qt.CheckState.Checked.value
